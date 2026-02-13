@@ -1,0 +1,9 @@
+/vendor
+/node_modules
+/public/build
+.env
+.git
+.github
+tests
+phpunit.xml
+README.md
