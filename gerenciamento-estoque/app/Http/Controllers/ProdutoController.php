@@ -17,15 +17,15 @@ class ProdutoController extends Controller
         // Aplicar busca se houver termo de pesquisa
         if ($request->filled('search')) {
             $search = strtolower($request->search);
-            $query->where(function($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->whereRaw('LOWER(codigo) like ?', ["%{$search}%"])
-                  ->orWhereRaw('LOWER(nome) like ?', ["%{$search}%"])
-                  ->orWhereRaw('LOWER(fabricante) like ?', ["%{$search}%"]);
+                    ->orWhereRaw('LOWER(nome) like ?', ["%{$search}%"])
+                    ->orWhereRaw('LOWER(fabricante) like ?', ["%{$search}%"]);
             });
         }
 
         $produtos = $query->paginate(10);
-        
+
         return view('produtos.index', compact('produtos'));
     }
 
@@ -39,7 +39,7 @@ class ProdutoController extends Controller
         $rules = [
             'codigo' => 'required|string|unique:produtos,codigo',
             'nome' => 'required|string|max:255',
-            'tipo' => 'required|in:item,medicamento',
+            'tipo' => 'required|in:geral,limpeza,medicamento', // Professor: Adicionamos as novas categorias aqui
             'fabricante' => 'nullable|string|max:255',
             'local_armazenamento' => 'nullable|string|max:255'
         ];
@@ -59,7 +59,11 @@ class ProdutoController extends Controller
 
             // Criar produto
             $produto = Produto::create($request->only([
-                'codigo', 'nome', 'tipo', 'fabricante', 'local_armazenamento'
+                'codigo',
+                'nome',
+                'tipo',
+                'fabricante',
+                'local_armazenamento'
             ]));
 
             // Criar lote se solicitado
@@ -79,14 +83,15 @@ class ProdutoController extends Controller
                     'tipo' => 'entrada',
                     'quantidade' => $request->quantidade_inicial,
                     'data_movimentacao' => $request->data_entrada,
-                    'observacao' => 'Entrada inicial do lote'
+                    'observacao' => 'Entrada inicial do lote',
+                    'responsavel' => 'Sistema (Cadastro)' // Professor: Rastreamos que foi uma entrada automática no cadastro
                 ]);
             }
 
             DB::commit();
 
-            $message = $request->has('criar_lote') && $request->criar_lote 
-                ? 'Produto e lote criados com sucesso!' 
+            $message = $request->has('criar_lote') && $request->criar_lote
+                ? 'Produto e lote criados com sucesso!'
                 : 'Produto criado com sucesso!';
 
             return redirect()->route('produtos.index')
@@ -116,13 +121,13 @@ class ProdutoController extends Controller
         $request->validate([
             'codigo' => 'required|string|unique:produtos,codigo,' . $produto->id,
             'nome' => 'required|string|max:255',
-            'tipo' => 'required|in:item,medicamento',
+            'tipo' => 'required|in:geral,limpeza,medicamento',
             'fabricante' => 'nullable|string|max:255',
             'local_armazenamento' => 'nullable|string|max:255'
         ]);
 
         $produto->update($request->all());
-        
+
         return redirect()->route('produtos.index')
             ->with('success', 'Produto atualizado com sucesso!');
     }
@@ -135,7 +140,7 @@ class ProdutoController extends Controller
         }
 
         $produto->delete();
-        
+
         return redirect()->route('produtos.index')
             ->with('success', 'Produto excluído com sucesso!');
     }

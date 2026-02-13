@@ -19,7 +19,7 @@ class MovimentacaoController extends Controller
         }
 
         if ($request->filled('produto_id')) {
-            $query->whereHas('lote', function($q) use ($request) {
+            $query->whereHas('lote', function ($q) use ($request) {
                 $q->where('produto_id', $request->produto_id);
             });
         }
@@ -43,23 +43,72 @@ class MovimentacaoController extends Controller
         $lotes = Lote::with('produto')
             ->where('quantidade_atual', '>', 0)
             ->get();
-        
-        return view('movimentacoes.create', compact('lotes'));
+
+        $unidades = \App\Models\Unidade::orderBy('nome')->get();
+
+        return view('movimentacoes.create', compact('lotes', 'unidades'));
     }
 
     public function store(Request $request)
     {
+        // Se for um envio múltiplo, processamos em lote
+        if ($request->has('multiplo') && $request->multiplo == '1' && $request->has('itens')) {
+            $itens = json_decode($request->itens, true);
+
+            if (empty($itens)) {
+                return redirect()->back()->with('error', 'Nenhum item adicionado à lista!')->withInput();
+            }
+
+            try {
+                \Illuminate\Support\Facades\DB::beginTransaction();
+
+                // Protocolo baseado em timestamp + aleatório para agrupar estes itens
+                $protocolo = 'PRT' . now()->format('YmdHi') . rand(10, 99);
+
+                foreach ($itens as $item) {
+                    $lote = Lote::findOrFail($item['lote_id']);
+
+                    // Validação de estoque para saídas
+                    if ($request->tipo === 'saida' && $item['quantidade'] > $lote->quantidade_atual) {
+                        throw new \Exception("Estoque insuficiente para o item: {$lote->produto->nome}");
+                    }
+
+                    Movimentacao::create([
+                        'protocolo' => $protocolo,
+                        'lote_id' => $item['lote_id'],
+                        'tipo' => $request->tipo,
+                        'quantidade' => $item['quantidade'],
+                        'data_movimentacao' => $request->data_movimentacao,
+                        'responsavel' => $request->responsavel,
+                        'unidade_id' => $request->unidade_id,
+                        'observacao' => $request->observacao
+                    ]);
+                }
+
+                \Illuminate\Support\Facades\DB::commit();
+
+                return redirect()->route('movimentacoes.index')
+                    ->with('success', 'Dispensação múltipla registrada com sucesso! Protocolo: ' . $protocolo);
+
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\DB::rollback();
+                return redirect()->back()
+                    ->with('error', 'Erro ao processar dispensação: ' . $e->getMessage())
+                    ->withInput();
+            }
+        }
+
+        // Fluxo padrão (Simples)
         $request->validate([
             'lote_id' => 'required|exists:lotes,id',
             'tipo' => 'required|in:entrada,saida',
             'quantidade' => 'required|integer|min:1',
             'data_movimentacao' => 'required|date',
-            'observacao' => 'nullable|string|max:500'
+            'responsavel' => 'required|string|max:255'
         ]);
 
         $lote = Lote::find($request->lote_id);
 
-        // Validação para saídas
         if ($request->tipo === 'saida' && $request->quantidade > $lote->quantidade_atual) {
             return redirect()->back()
                 ->with('error', 'Quantidade de saída maior que o disponível em estoque!')
@@ -97,5 +146,23 @@ class MovimentacaoController extends Controller
         // Não permitir exclusão para manter integridade do histórico
         return redirect()->route('movimentacoes.index')
             ->with('error', 'Movimentações não podem ser excluídas para manter o histórico.');
+    }
+
+    /**
+     * Gerar visualização de Recibo/Comprovante (Estilo Folha Papel)
+     */
+    public function recibo(Movimentacao $movimentacao)
+    {
+        $movimentacao->load(['lote.produto', 'unidade']);
+
+        // Se houver protocolo, buscamos todos os itens desse grupo
+        $itens = collect([$movimentacao]);
+        if ($movimentacao->protocolo) {
+            $itens = Movimentacao::with(['lote.produto', 'unidade'])
+                ->where('protocolo', $movimentacao->protocolo)
+                ->get();
+        }
+
+        return view('movimentacoes.recibo', compact('movimentacao', 'itens'));
     }
 }
